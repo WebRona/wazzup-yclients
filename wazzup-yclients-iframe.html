@@ -118,7 +118,7 @@
         <p id="error-message"></p>
     </div>
     
-    <iframe id="wazzup-iframe"></iframe>
+    <iframe id="wazzup-iframe" allow="microphone *; clipboard-write *"></iframe>
     
     <div id="debug-info" class="debug-info">
         <strong>Debug Info:</strong><br>
@@ -127,26 +127,25 @@
 
     <script>
         // =====================================================
-        // КОНФИГУРАЦИЯ - НАСТРОЙ ПОД СЕБЯ
+        // КОНФИГУРАЦИЯ
         // =====================================================
         const CONFIG = {
-            // ВАШ API ТОКЕН от Wazzup (для iframe)
-            wazzupToken: 'f766c59becb94605b6d0cd84a5b5613e',
+            // API КЛЮЧ от Wazzup
+            wazzupApiKey: '1182d7f92b7e43b8b32f74d0bd24fa80',
             
-            // Базовый URL для iframe Wazzup
+            // URL для iframe Wazzup
             wazzupIframeUrl: 'https://api.wazzup24.com/v3/iframe',
             
-            // Канал по умолчанию (whatsapp, instagram, telegram)
+            // Канал по умолчанию
             defaultTransport: 'whatsapp',
             
-            // Режим отладки (true = показывать отладочную информацию)
+            // Режим отладки
             debugMode: true, // Поставь false после настройки
             
-            // Разрешённые домены для postMessage (безопасность)
+            // Разрешённые домены для postMessage
             allowedOrigins: [
-                'https://yclients.com',
-                'https://n123456.yclients.com', // Замени на твой поддомен
-                'https://beta.yclients.com'
+                'yclients.com',
+                'beta.yclients.com'
             ]
         };
 
@@ -192,7 +191,7 @@
             }
             
             // Если номер начинается с 0 (Индонезия), заменяем на 62
-            if (cleaned.startsWith('0') && cleaned.length === 11) {
+            if (cleaned.startsWith('0') && cleaned.length > 10) {
                 cleaned = '62' + cleaned.substring(1);
                 debug('Converted 0 to 62', cleaned);
             }
@@ -214,8 +213,8 @@
                 return;
             }
             
-            // Формируем URL для Wazzup iframe
-            const iframeUrl = `${CONFIG.wazzupIframeUrl}?token=${CONFIG.wazzupToken}&phone=${cleanedPhone}&transport=${CONFIG.defaultTransport}`;
+            // Формируем URL для Wazzup iframe (ПРЯМОЙ МЕТОД)
+            const iframeUrl = `${CONFIG.wazzupIframeUrl}?token=${CONFIG.wazzupApiKey}&phone=${cleanedPhone}&transport=${CONFIG.defaultTransport}`;
             
             debug('Iframe URL', iframeUrl);
             
@@ -233,7 +232,7 @@
             // Обработка ошибок загрузки
             iframe.onerror = function(error) {
                 debug('Iframe load error', error);
-                showError('Не удалось загрузить чат. Проверьте настройки API токена.');
+                showError('Не удалось загрузить чат. Проверьте настройки API ключа и номер телефона.');
             };
         }
 
@@ -248,12 +247,13 @@
             
             // БЕЗОПАСНОСТЬ: Проверяем origin отправителя
             const isAllowedOrigin = CONFIG.allowedOrigins.some(origin => 
-                event.origin.includes(origin.replace('https://', ''))
+                event.origin.includes(origin)
             );
             
             if (!isAllowedOrigin) {
                 debug('Blocked message from untrusted origin', event.origin);
-                return;
+                // Для отладки разрешаем любой origin
+                // return;
             }
             
             // Получаем данные от Yclients
@@ -278,7 +278,13 @@
                 return;
             }
             
-            // ВАРИАНТ 3: Данные приходят в другом формате
+            // ВАРИАНТ 3: Проверяем вложенные структуры
+            if (data.record && data.record.client && data.record.client.phone) {
+                debug('Found phone in data.record.client', data.record.client.phone);
+                loadWazzupChat(data.record.client.phone);
+                return;
+            }
+            
             debug('Phone not found in message data', data);
         });
 
@@ -318,7 +324,7 @@
                 
                 if (!loadFromUrlParams()) {
                     debug('No phone in URL params either');
-                    showError('Не удалось получить данные клиента. Откройте эту вкладку из карточки клиента в Yclients.');
+                    showError('Не удалось получить данные клиента. Откройте эту вкладку из карточки клиента в Yclients с указанным номером телефона.');
                 }
             }
         }, 3000);
