@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Wazzup Chat</title>
+    <title>Wazzup Messenger</title>
     <style>
         * {
             margin: 0;
@@ -21,7 +21,6 @@
             width: 100%;
             height: 100vh;
             border: none;
-            display: none;
         }
         
         .loading {
@@ -35,6 +34,7 @@
             align-items: center;
             justify-content: center;
             background: #ffffff;
+            z-index: 1000;
         }
         
         .spinner {
@@ -57,277 +57,104 @@
             font-size: 16px;
         }
         
-        .error {
+        .info {
             position: fixed;
-            top: 50%;
+            top: 10px;
             left: 50%;
-            transform: translate(-50%, -50%);
-            background: #fff;
-            padding: 30px;
-            border-radius: 10px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            text-align: center;
-            max-width: 400px;
-            display: none;
-        }
-        
-        .error.show {
-            display: block;
-        }
-        
-        .error h2 {
-            color: #f44336;
-            margin-bottom: 10px;
-            font-size: 20px;
-        }
-        
-        .error p {
-            color: #666;
-            line-height: 1.6;
-            font-size: 14px;
-        }
-        
-        .debug-info {
-            position: fixed;
-            bottom: 10px;
-            right: 10px;
-            background: rgba(0,0,0,0.8);
-            color: #fff;
-            padding: 10px;
+            transform: translateX(-50%);
+            background: rgba(76, 175, 80, 0.9);
+            color: white;
+            padding: 10px 20px;
             border-radius: 5px;
-            font-size: 11px;
-            max-width: 300px;
+            font-size: 14px;
             display: none;
-            max-height: 200px;
-            overflow-y: auto;
+            z-index: 999;
         }
         
-        .debug-info.show {
+        .info.show {
             display: block;
+            animation: fadeIn 0.3s;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateX(-50%) translateY(-10px); }
+            to { opacity: 1; transform: translateX(-50%) translateY(0); }
         }
     </style>
 </head>
 <body>
     <div id="loading" class="loading">
         <div class="spinner"></div>
-        <p>Загрузка чата...</p>
+        <p>Загрузка Wazzup...</p>
     </div>
     
-    <div id="error" class="error">
-        <h2>⚠️ Ошибка</h2>
-        <p id="error-message"></p>
-    </div>
+    <div id="info" class="info"></div>
     
-    <iframe id="wazzup-iframe" allow="microphone *; clipboard-write *"></iframe>
-    
-    <div id="debug-info" class="debug-info">
-        <strong>Debug Info:</strong><br>
-        <span id="debug-text"></span>
-    </div>
+    <iframe 
+        id="wazzup-iframe"
+        src="https://app.wazzup24.com/"
+        allow="microphone *; clipboard-write *; camera *"
+        allowfullscreen
+    ></iframe>
 
     <script>
-        // =====================================================
-        // КОНФИГУРАЦИЯ
-        // =====================================================
+        // Конфигурация
         const CONFIG = {
-            // API КЛЮЧ от Wazzup
-            wazzupApiKey: '1182d7f92b7e43b8b32f74d0bd24fa80',
-            
-            // URL для iframe Wazzup
-            wazzupIframeUrl: 'https://api.wazzup24.com/v3/iframe',
-            
-            // Канал по умолчанию
-            defaultTransport: 'whatsapp',
-            
-            // Режим отладки
-            debugMode: true, // Поставь false после настройки
-            
-            // Разрешённые домены для postMessage
-            allowedOrigins: [
-                'yclients.com',
-                'beta.yclients.com'
-            ]
+            wazzupUrl: 'https://app.wazzup24.com/',
+            debugMode: false
         };
 
-        // =====================================================
-        // ФУНКЦИИ ОТЛАДКИ
-        // =====================================================
         function debug(message, data) {
             if (CONFIG.debugMode) {
                 console.log('[Wazzup-Yclients]', message, data || '');
-                
-                const debugDiv = document.getElementById('debug-info');
-                const debugText = document.getElementById('debug-text');
-                debugDiv.classList.add('show');
-                
-                const timestamp = new Date().toLocaleTimeString();
-                const dataStr = data ? '<br>' + JSON.stringify(data, null, 2) : '';
-                debugText.innerHTML = `[${timestamp}] ${message}${dataStr}`;
             }
         }
 
-        function showError(message) {
-            debug('Error', message);
-            document.getElementById('loading').style.display = 'none';
-            document.getElementById('error').classList.add('show');
-            document.getElementById('error-message').textContent = message;
+        function showInfo(message, duration = 3000) {
+            const infoDiv = document.getElementById('info');
+            infoDiv.textContent = message;
+            infoDiv.classList.add('show');
+            
+            setTimeout(() => {
+                infoDiv.classList.remove('show');
+            }, duration);
         }
 
-        // =====================================================
-        // ФУНКЦИЯ ОЧИСТКИ НОМЕРА ТЕЛЕФОНА
-        // =====================================================
-        function cleanPhone(phone) {
-            if (!phone) return null;
-            
-            // Убираем все символы кроме цифр
-            let cleaned = phone.replace(/\D/g, '');
-            
-            debug('Cleaning phone', { original: phone, cleaned: cleaned });
-            
-            // Если номер начинается с 8 (Россия), заменяем на 7
-            if (cleaned.startsWith('8') && cleaned.length === 11) {
-                cleaned = '7' + cleaned.substring(1);
-                debug('Converted 8 to 7', cleaned);
-            }
-            
-            // Если номер начинается с 0 (Индонезия), заменяем на 62
-            if (cleaned.startsWith('0') && cleaned.length > 10) {
-                cleaned = '62' + cleaned.substring(1);
-                debug('Converted 0 to 62', cleaned);
-            }
-            
-            return cleaned;
-        }
-
-        // =====================================================
-        // ЗАГРУЗКА WAZZUP IFRAME
-        // =====================================================
-        function loadWazzupChat(phone) {
-            debug('Loading Wazzup chat', { phone: phone });
-            
-            // Очищаем номер телефона
-            const cleanedPhone = cleanPhone(phone);
-            
-            if (!cleanedPhone) {
-                showError('Не указан номер телефона клиента. Убедитесь, что в карточке клиента заполнен номер телефона.');
-                return;
-            }
-            
-            // Формируем URL для Wazzup iframe (ПРЯМОЙ МЕТОД)
-            const iframeUrl = `${CONFIG.wazzupIframeUrl}?token=${CONFIG.wazzupApiKey}&phone=${cleanedPhone}&transport=${CONFIG.defaultTransport}`;
-            
-            debug('Iframe URL', iframeUrl);
-            
-            // Загружаем iframe
-            const iframe = document.getElementById('wazzup-iframe');
-            iframe.src = iframeUrl;
-            
-            // Показываем iframe после загрузки
-            iframe.onload = function() {
-                debug('Iframe loaded successfully');
-                document.getElementById('loading').style.display = 'none';
-                iframe.style.display = 'block';
-            };
-            
-            // Обработка ошибок загрузки
-            iframe.onerror = function(error) {
-                debug('Iframe load error', error);
-                showError('Не удалось загрузить чат. Проверьте настройки API ключа и номер телефона.');
-            };
-        }
-
-        // =====================================================
-        // ОБРАБОТЧИК СООБЩЕНИЙ ОТ YCLIENTS (postMessage)
-        // =====================================================
+        // Инициализация
+        debug('Initializing Wazzup integration');
+        
+        const iframe = document.getElementById('wazzup-iframe');
+        const loading = document.getElementById('loading');
+        
+        // Скрываем загрузку после загрузки iframe
+        iframe.onload = function() {
+            debug('Wazzup interface loaded');
+            setTimeout(() => {
+                loading.style.display = 'none';
+            }, 500);
+        };
+        
+        // Обработка ошибок
+        iframe.onerror = function(error) {
+            debug('Iframe load error', error);
+            loading.innerHTML = '<h2 style="color: #f44336;">❌ Ошибка загрузки</h2><p style="color: #666; margin-top: 10px;">Не удалось загрузить интерфейс Wazzup</p>';
+        };
+        
+        // Слушаем сообщения от Yclients (на будущее)
         window.addEventListener('message', function(event) {
-            debug('Received postMessage', {
-                origin: event.origin,
-                data: event.data
-            });
+            debug('Received message', event.data);
             
-            // БЕЗОПАСНОСТЬ: Проверяем origin отправителя
-            const isAllowedOrigin = CONFIG.allowedOrigins.some(origin => 
-                event.origin.includes(origin)
-            );
-            
-            if (!isAllowedOrigin) {
-                debug('Blocked message from untrusted origin', event.origin);
-                // Для отладки разрешаем любой origin
-                // return;
+            // Можно обрабатывать данные от Yclients
+            if (event.data && event.data.client) {
+                const clientName = event.data.client.name || 'клиента';
+                showInfo(`Открыта карточка ${clientName}`);
             }
-            
-            // Получаем данные от Yclients
-            const data = event.data;
-            
-            if (!data) {
-                debug('No data in message');
-                return;
-            }
-            
-            // ВАРИАНТ 1: Данные приходят как объект с client
-            if (data.client && data.client.phone) {
-                debug('Found phone in data.client', data.client.phone);
-                loadWazzupChat(data.client.phone);
-                return;
-            }
-            
-            // ВАРИАНТ 2: Данные приходят как объект с phone напрямую
-            if (data.phone) {
-                debug('Found phone in data', data.phone);
-                loadWazzupChat(data.phone);
-                return;
-            }
-            
-            // ВАРИАНТ 3: Проверяем вложенные структуры
-            if (data.record && data.record.client && data.record.client.phone) {
-                debug('Found phone in data.record.client', data.record.client.phone);
-                loadWazzupChat(data.record.client.phone);
-                return;
-            }
-            
-            debug('Phone not found in message data', data);
         });
-
-        // =====================================================
-        // ЗАПАСНОЙ ВАРИАНТ: Получение из URL параметров
-        // =====================================================
-        function loadFromUrlParams() {
-            const urlParams = new URLSearchParams(window.location.search);
-            const phoneFromUrl = urlParams.get('phone');
-            
-            if (phoneFromUrl) {
-                debug('Found phone in URL params', phoneFromUrl);
-                loadWazzupChat(phoneFromUrl);
-                return true;
-            }
-            
-            return false;
-        }
-
-        // =====================================================
-        // ИНИЦИАЛИЗАЦИЯ
-        // =====================================================
-        debug('Initializing Wazzup-Yclients integration', CONFIG);
         
-        // Уведомляем Yclients что iframe готов принимать данные
+        // Уведомляем родителя что готовы
         if (window.parent !== window) {
-            debug('Sending ready signal to parent');
-            window.parent.postMessage({ type: 'iframe_ready' }, '*');
+            window.parent.postMessage({ type: 'wazzup_ready' }, '*');
         }
-        
-        // Если через 3 секунды данные не пришли - пробуем URL параметры
-        setTimeout(function() {
-            const iframe = document.getElementById('wazzup-iframe');
-            
-            if (!iframe.src) {
-                debug('No data received after 3s, trying URL params');
-                
-                if (!loadFromUrlParams()) {
-                    debug('No phone in URL params either');
-                    showError('Не удалось получить данные клиента. Откройте эту вкладку из карточки клиента в Yclients с указанным номером телефона.');
-                }
-            }
-        }, 3000);
     </script>
 </body>
 </html>
