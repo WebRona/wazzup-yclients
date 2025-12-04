@@ -2,9 +2,9 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
-  <!-- Фиксированная ширина под iframe Yclients -->
+  <!-- Фиксированная ширина под iframe YCLIENTS -->
   <meta name="viewport" content="width=374">
-  <title>Wazzup для Yclients</title>
+  <title>Wazzup для YCLIENTS</title>
   <style>
     * {
       margin: 0;
@@ -184,27 +184,28 @@
     <iframe
       id="wazzup-iframe"
       frameborder="0"
+      allow="microphone *; clipboard-write *"
       allowfullscreen
       title="Чаты Wazzup">
     </iframe>
   </div>
 
   <script>
-    // ======= КОНФИГ (только для фронтового прототипа) =======
+    // ======= КОНФИГ (фронтовый прототип) =======
     const CONFIG = {
       WAZZUP_IFRAME_BASE: 'https://app.wazzup24.com/iframe',
-      AUTH_REQUIRED: false // авторизацию можно включить позже
+      AUTH_REQUIRED: false
     };
 
-    // ======= Телефон =======
+    // ======= Утилиты: телефон =======
     function formatPhone(phone) {
       if (!phone) return null;
       let cleaned = String(phone).replace(/\D/g, '');
       if (cleaned.startsWith('8') && cleaned.length === 11) {
-        cleaned = '7' + cleaned.slice(1);
+        cleaned = '7' + cleaned.slice(1); // РФ 8XXXXXXXXXX -> 7XXXXXXXXXX
       }
       if (cleaned.length === 10) {
-        cleaned = '7' + cleaned;
+        cleaned = '7' + cleaned; // без кода страны считаем РФ
       }
       return '+' + cleaned;
     }
@@ -245,8 +246,8 @@
         message || 'Произошла неизвестная ошибка.';
     }
 
-    // ======= iframe Wazzup =======
-    function buildWazzupIframeUrl(phone) {
+    // ======= Wazzup iframe =======
+    function buildWazzupUrlCard(phone) {
       const params = new URLSearchParams({
         scope: 'card',
         phone: phone
@@ -254,12 +255,18 @@
       return CONFIG.WAZZUP_IFRAME_BASE + '?' + params.toString();
     }
 
-    function loadWazzupChat(phone) {
+    function buildWazzupUrlGlobal() {
+      const params = new URLSearchParams({
+        scope: 'global'
+      });
+      return CONFIG.WAZZUP_IFRAME_BASE + '?' + params.toString();
+    }
+
+    function loadIframe(url) {
       const iframe = document.getElementById('wazzup-iframe');
       if (!iframe) return;
 
-      const url = buildWazzupIframeUrl(phone);
-      console.log('[loadWazzupChat] url =', url);
+      console.log('[loadIframe] url =', url);
       iframe.src = url;
 
       iframe.onload = function () {
@@ -276,18 +283,68 @@
       };
     }
 
-    // ======= Основная логика =======
-    const urlParams   = new URLSearchParams(window.location.search);
-    const salonId     = urlParams.get('salon_id');
-    const clientId    = urlParams.get('client_id');
-    const clientPhone = urlParams.get('client_phone');
-    const clientName  = urlParams.get('client_name') || '';
+    // ======= Работа с YCLIENTS (вкладки employee/client/visit) =======
+    function sendIframeReady(success) {
+      try {
+        window.parent.postMessage({
+          type: 'iframe_ready',
+          payload: { success: success }
+        }, '*');
+        console.log('[YCLIENTS] iframe_ready sent');
+      } catch (e) {
+        console.warn('[YCLIENTS] iframe_ready error', e);
+      }
+    }
 
-    function validateRequiredParams() {
-      if (!salonId || !clientId || !clientPhone) {
-        console.error('Missing required params', { salonId, clientId, clientPhone });
-        showError('Недостаточно данных для загрузки чата. Обратитесь к администратору.');
-        throw new Error('Missing required parameters');
+    function requestEntity() {
+      try {
+        window.parent.postMessage({ type: 'iframe_request_entity' }, '*');
+        console.log('[YCLIENTS] iframe_request_entity sent');
+      } catch (e) {
+        console.warn('[YCLIENTS] iframe_request_entity error', e);
+      }
+    }
+
+    function extractPhoneFromEntity(msg) {
+      if (!msg || msg.type !== 'yclients_response_entity' || !msg.payload) {
+        return null;
+      }
+      const { entity_type, entity } = msg.payload;
+      console.log('[YCLIENTS] entity_type =', entity_type, 'entity =', entity);
+
+      if (!entity) return null;
+
+      if (entity_type === 'client') {
+        return entity.phone || (entity.comer && entity.comer.phone) || null;
+      }
+
+      if (entity_type === 'visit') {
+        if (entity.client) {
+          return entity.client.phone ||
+                 (entity.client.comer && entity.client.comer.phone) ||
+                 null;
+        }
+      }
+
+      // Для employee, как правило, нет телефона клиента — вернем null
+      return null;
+    }
+
+    // ======= Главная логика =======
+    const urlParams = new URLSearchParams(window.location.search);
+    const salonId   = urlParams.get('salon_id');
+    const userId    = urlParams.get('user_id');
+    const entityId  = urlParams.get('entity_id');
+    const entityType = urlParams.get('entity_type'); // employee | visit | client
+
+    // Тестовый режим: можно передать client_phone напрямую
+    const testClientPhone = urlParams.get('client_phone');
+
+    function validateBaseParamsIfAny() {
+      // Для вкладок employee/visit/client по документации всегда будет salon_id и entity_type.
+      // Но если страница открыта напрямую для теста — не ломаемся.
+      if (!entityType && !testClientPhone) {
+        console.log('[init] entity_type и client_phone не переданы — ожидаем открытие из YCLIENTS или тестовый режим.');
       }
     }
 
@@ -298,26 +355,74 @@
       }
     }
 
-    async function init() {
-      console.log('[init] start');
+    function init() {
+      console.log('[init] start', { salonId, userId, entityId, entityType, testClientPhone });
+
       document.getElementById('logout-btn').addEventListener('click', logout);
-      document.getElementById('retry-btn').addEventListener('click', () => location.reload());
+      document.getElementById('retry-btn').addEventListener('click', function () {
+        location.reload();
+      });
 
       try {
-        validateRequiredParams();
+        validateBaseParamsIfAny();
         checkAuthOrFail();
 
-        const formattedPhone = formatPhone(clientPhone);
-        console.log('[init] phone:', clientPhone, '=>', formattedPhone);
-
-        if (!formattedPhone || !isValidPhone(formattedPhone)) {
-          showError('Номер телефона клиента указан некорректно.');
-          throw new Error('Invalid phone');
+        // 1) ТЕСТОВЫЙ РЕЖИМ — client_phone в query
+        if (testClientPhone) {
+          const formatted = formatPhone(testClientPhone);
+          console.log('[init] test phone from URL:', testClientPhone, '=>', formatted);
+          if (!formatted || !isValidPhone(formatted)) {
+            showError('Тестовый номер телефона указан некорректно.');
+            return;
+          }
+          loadIframe(buildWazzupUrlCard(formatted));
+          return;
         }
 
-        // ВАЖНО: на этом прототипном этапе НИЧЕГО не шлём в Wazzup API,
-        // только открываем iframe по номеру:
-        loadWazzupChat(formattedPhone);
+        // 2) РЕЖИМ ВКЛАДОК YCLIENTS
+        if (!entityType) {
+          // Открыли напрямую без параметров
+          showError('Страница должна открываться из YCLIENTS.');
+          return;
+        }
+
+        // Подписываемся на ответы от YCLIENTS
+        window.addEventListener('message', function (event) {
+          const data = event.data;
+          if (!data || typeof data !== 'object') return;
+          console.log('[message] from parent:', data);
+
+          if (data.type === 'yclients_response_entity') {
+            // Пришли данные сущности
+            const phoneRaw = extractPhoneFromEntity(data);
+
+            if (entityType === 'employee') {
+              // Для сотрудника показываем глобальный список чатов
+              console.log('[init] entity_type=employee => scope=global');
+              loadIframe(buildWazzupUrlGlobal());
+              return;
+            }
+
+            if (!phoneRaw) {
+              showError('У клиента не указан телефон в YCLIENTS.');
+              return;
+            }
+
+            const formatted = formatPhone(phoneRaw);
+            console.log('[init] phone from entity:', phoneRaw, '=>', formatted);
+
+            if (!formatted || !isValidPhone(formatted)) {
+              showError('Номер телефона клиента указан некорректно.');
+              return;
+            }
+
+            loadIframe(buildWazzupUrlCard(formatted));
+          }
+        });
+
+        // Сообщаем YCLIENTS, что iframe готов, и запрашиваем сущность
+        sendIframeReady(true);
+        requestEntity();
       } catch (e) {
         console.error('[init] error', e);
         if (!(e instanceof Error && e.message === 'Not authorized')) {
