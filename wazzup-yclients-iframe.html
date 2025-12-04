@@ -190,31 +190,22 @@
   </div>
 
   <script>
-    // ======= КОНФИГ (для прототипа; в проде выносить на сервер) =======
+    // ======= КОНФИГ (только для фронтового прототипа) =======
     const CONFIG = {
-      WAZZUP_API_TOKEN: '1182d7f92b7e43b8b32f74d0bd24fa80',
-      YCLIENTS_API_TOKEN: '9950f34db8913770cb8696a8eac2beca',
-
-      WAZZUP_API_BASE: 'https://api.wazzup24.com/v3',
-      YCLIENTS_API_BASE: 'https://api.yclients.com/api/v1',
       WAZZUP_IFRAME_BASE: 'https://app.wazzup24.com/iframe',
-
-      AUTH_REQUIRED: false // true — если хотите имитировать авторизацию
+      AUTH_REQUIRED: false // авторизацию можно включить позже
     };
 
-    // ======= УТИЛИТЫ: телефон =======
+    // ======= Телефон =======
     function formatPhone(phone) {
       if (!phone) return null;
       let cleaned = String(phone).replace(/\D/g, '');
-
       if (cleaned.startsWith('8') && cleaned.length === 11) {
-        cleaned = '7' + cleaned.slice(1); // РФ 8XXXXXXXXXX -> 7XXXXXXXXXX
+        cleaned = '7' + cleaned.slice(1);
       }
-
       if (cleaned.length === 10) {
-        cleaned = '7' + cleaned; // без кода страны считаем РФ
+        cleaned = '7' + cleaned;
       }
-
       return '+' + cleaned;
     }
 
@@ -224,84 +215,37 @@
       return cleaned.length >= 10 && cleaned.length <= 15;
     }
 
-    // ======= Псевдо-авторизация (фронтовая заглушка) =======
+    // ======= Псевдо‑авторизация =======
     function isAuthorized() {
       if (!CONFIG.AUTH_REQUIRED) return true;
       return !!localStorage.getItem('wazzup_yclients_auth');
-    }
-
-    function setAuthorized() {
-      localStorage.setItem('wazzup_yclients_auth', '1');
     }
 
     function logout() {
       localStorage.removeItem('wazzup_yclients_auth');
       try {
         window.parent.postMessage({ type: 'logout' }, '*');
-      } catch (e) {
-        console.warn('[logout] postMessage не удался:', e);
-      }
+      } catch (e) {}
       location.reload();
     }
 
     function showAuthError() {
-      const loader = document.getElementById('loader');
-      const errorBlock = document.getElementById('error');
-      const errorMsg = document.getElementById('error-message');
-
-      if (loader) loader.classList.add('hidden');
-      if (errorBlock) errorBlock.classList.remove('hidden');
-      if (errorMsg) {
-        errorMsg.textContent = 'Требуется авторизация для работы с мессенджерами.';
-      }
+      document.getElementById('loader').classList.add('hidden');
+      document.getElementById('error').classList.remove('hidden');
+      document.getElementById('error-message').textContent =
+        'Требуется авторизация для работы с мессенджерами.';
     }
 
-    // ======= Работы с Wazzup API =======
-    async function syncContactToWazzup(contactData) {
-      const url = CONFIG.WAZZUP_API_BASE + '/contacts';
-
-      const response = await fetch(url, {
-        method: 'PATCH',
-        headers: {
-          'Authorization': 'Bearer ' + CONFIG.WAZZUP_API_TOKEN,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(contactData)
-      });
-
-      if (!response.ok) {
-        console.error('[syncContactToWazzup] Ошибка:', response.status, response.statusText);
-        throw new Error('Wazzup API error: ' + response.status);
-      }
-
-      return response.json();
+    // ======= UI ошибки =======
+    function showError(message) {
+      document.getElementById('loader').classList.add('hidden');
+      document.getElementById('chat-container').classList.add('hidden');
+      document.getElementById('error').classList.remove('hidden');
+      document.getElementById('error-message').textContent =
+        message || 'Произошла неизвестная ошибка.';
     }
 
-    async function getWazzupChannels() {
-      const url = CONFIG.WAZZUP_API_BASE + '/channels';
-
-      const response = await fetch(url, {
-        headers: {
-          'Authorization': 'Bearer ' + CONFIG.WAZZUP_API_TOKEN
-        }
-      });
-
-      if (!response.ok) {
-        console.error('[getWazzupChannels] Ошибка:', response.status, response.statusText);
-        throw new Error('Не удалось получить список каналов: ' + response.status);
-      }
-
-      return response.json();
-    }
-
-    const CRITICAL_STATES = [
-      'qridle',
-      'phoneUnavailable',
-      'disabled',
-      'blocked'
-    ];
-
-    // ======= Загрузка iframe Wazzup =======
+    // ======= iframe Wazzup =======
     function buildWazzupIframeUrl(phone) {
       const params = new URLSearchParams({
         scope: 'card',
@@ -312,67 +256,36 @@
 
     function loadWazzupChat(phone) {
       const iframe = document.getElementById('wazzup-iframe');
-      if (!iframe) {
-        console.error('[loadWazzupChat] Iframe не найден');
-        return;
-      }
+      if (!iframe) return;
 
       const url = buildWazzupIframeUrl(phone);
-      console.log('[loadWazzupChat] Загружаем iframe:', url);
-
+      console.log('[loadWazzupChat] url =', url);
       iframe.src = url;
 
       iframe.onload = function () {
-        console.log('[loadWazzupChat] Iframe загружен');
-        const loader = document.getElementById('loader');
-        const errorBlock = document.getElementById('error');
-        const chatContainer = document.getElementById('chat-container');
-
-        if (loader) loader.classList.add('hidden');
-        if (errorBlock) errorBlock.classList.add('hidden');
-        if (chatContainer) chatContainer.classList.remove('hidden');
-
+        document.getElementById('loader').classList.add('hidden');
+        document.getElementById('error').classList.add('hidden');
+        document.getElementById('chat-container').classList.remove('hidden');
         try {
           window.parent.postMessage({ type: 'ready' }, '*');
-        } catch (e) {
-          console.warn('[loadWazzupChat] postMessage ready не удался:', e);
-        }
+        } catch (e) {}
       };
 
       iframe.onerror = function () {
-        console.error('[loadWazzupChat] Ошибка загрузки iframe');
         showError('Не удалось загрузить интерфейс Wazzup');
       };
     }
 
-    // ======= Общая логика =======
-    const urlParams = new URLSearchParams(window.location.search);
-    const salonId   = urlParams.get('salon_id');
-    const clientId  = urlParams.get('client_id');
+    // ======= Основная логика =======
+    const urlParams   = new URLSearchParams(window.location.search);
+    const salonId     = urlParams.get('salon_id');
+    const clientId    = urlParams.get('client_id');
     const clientPhone = urlParams.get('client_phone');
     const clientName  = urlParams.get('client_name') || '';
-    const staffId   = urlParams.get('staff_id') || '';
-    const recordId  = urlParams.get('record_id') || '';
-
-    function showError(message) {
-      const loader = document.getElementById('loader');
-      const errorBlock = document.getElementById('error');
-      const errorMsg = document.getElementById('error-message');
-      const chatContainer = document.getElementById('chat-container');
-
-      if (loader) loader.classList.add('hidden');
-      if (chatContainer) chatContainer.classList.add('hidden');
-      if (errorBlock) errorBlock.classList.remove('hidden');
-      if (errorMsg) errorMsg.textContent = message || 'Произошла неизвестная ошибка.';
-    }
 
     function validateRequiredParams() {
       if (!salonId || !clientId || !clientPhone) {
-        console.error('[validateRequiredParams] Отсутствуют обязательные параметры', {
-          salonId: salonId,
-          clientId: clientId,
-          clientPhone: clientPhone
-        });
+        console.error('Missing required params', { salonId, clientId, clientPhone });
         showError('Недостаточно данных для загрузки чата. Обратитесь к администратору.');
         throw new Error('Missing required parameters');
       }
@@ -380,71 +293,35 @@
 
     function checkAuthOrFail() {
       if (!isAuthorized()) {
-        console.warn('[checkAuthOrFail] Пользователь не авторизован');
         showAuthError();
         throw new Error('Not authorized');
       }
     }
 
     async function init() {
-      console.log('[init] Старт инициализации интеграции Wazzup/Yclients');
-
-      document.getElementById('logout-btn')?.addEventListener('click', logout);
-      document.getElementById('retry-btn')?.addEventListener('click', function () {
-        location.reload();
-      });
+      console.log('[init] start');
+      document.getElementById('logout-btn').addEventListener('click', logout);
+      document.getElementById('retry-btn').addEventListener('click', () => location.reload());
 
       try {
         validateRequiredParams();
         checkAuthOrFail();
 
         const formattedPhone = formatPhone(clientPhone);
-        console.log('[init] Исходный телефон:', clientPhone, '=>', formattedPhone);
+        console.log('[init] phone:', clientPhone, '=>', formattedPhone);
 
         if (!formattedPhone || !isValidPhone(formattedPhone)) {
           showError('Номер телефона клиента указан некорректно.');
-          throw new Error('Invalid phone number');
+          throw new Error('Invalid phone');
         }
 
-        const contactPayload = {
-          phone: formattedPhone,
-          name: clientName,
-          crmLink: 'https://yclients.com/clients/' + clientId,
-          crmLinkTitle: 'Открыть в Yclients',
-          customFields: {
-            salon_id: salonId,
-            staff_id: staffId,
-            record_id: recordId
-          }
-        };
-
-        console.log('[init] Синхронизация контакта в Wazzup:', contactPayload);
-        await syncContactToWazzup(contactPayload);
-
-        const channelsResponse = await getWazzupChannels();
-        const channels = Array.isArray(channelsResponse)
-          ? channelsResponse
-          : (channelsResponse.data || channelsResponse.channels || []);
-
-        console.log('[init] Получены каналы Wazzup:', channels);
-
-        const activeChannels = channels.filter(function (ch) { return ch.state === 'active'; });
-        const hasCritical = channels.some(function (ch) { return CRITICAL_STATES.includes(ch.state); });
-
-        if (hasCritical) {
-          console.warn('[init] Есть каналы в критическом состоянии');
-        }
-
-        if (activeChannels.length === 0) {
-          showError('Нет активных каналов в Wazzup. Подключите мессенджеры в настройках Wazzup.');
-          return;
-        }
-
+        // ВАЖНО: на этом прототипном этапе НИЧЕГО не шлём в Wazzup API,
+        // только открываем iframe по номеру:
         loadWazzupChat(formattedPhone);
-      } catch (error) {
-        console.error('[init] Ошибка инициализации:', error);
-        if (!(error instanceof Error && error.message === 'Not authorized')) {
-          showError('Ошибка инициализации: ' + (error.message || error));
+      } catch (e) {
+        console.error('[init] error', e);
+        if (!(e instanceof Error && e.message === 'Not authorized')) {
+          showError('Ошибка инициализации: ' + (e.message || e));
         }
       }
     }
