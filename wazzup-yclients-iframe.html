@@ -1,119 +1,272 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Wazzup Chat</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        body, html {
-            width: 100%;
-            height: 100%;
-            overflow: hidden;
-        }
-        iframe {
-            width: 100%;
-            height: 100%;
-            border: none;
-        }
-    </style>
+  <meta charset="UTF-8" />
+  <title>Wazzup интеграция для Yclients</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+    /* Растягиваем документ на весь экран */
+    html, body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+    }
+
+    /* Iframe всегда занимает 100% ширины и высоты */
+    #wazzup-frame {
+      width: 100%;
+      height: 100%;
+      border: none;
+      display: block;
+    }
+  </style>
 </head>
 <body>
-    <iframe id="wazzup-frame" src="about:blank"></iframe>
+  <!-- Единственный iframe для Wazzup -->
+  <iframe
+    id="wazzup-frame"
+    title="Wazzup Chats"
+    src="about:blank"
+  ></iframe>
 
-    <script>
-        const WAZZUP_API_KEY = 'f766c59becb94605b6d0cd84a5b5613e';
+  <script>
+    // ================== НАСТРОЙКИ ==================
+    // API ключ Wazzup (используется в параметре token)
+    const WAZZUP_API_KEY = '1182d7f92b7e43b8b32f74d0bd24fa80';
+    const WAZZUP_IFRAME_ENDPOINT = 'https://api.wazzup24.com/v3/iframe';
 
-        // Функция форматирования номера
-        function formatPhone(phone) {
-            if (!phone) return null;
-            
-            let cleaned = phone.replace(/\D/g, '');
-            
-            // Россия: 7 или 8
-            if (cleaned.startsWith('7') && cleaned.length === 11) {
-                return '+' + cleaned;
-            }
-            if (cleaned.startsWith('8') && cleaned.length === 11) {
-                return '+7' + cleaned.substring(1);
-            }
-            
-            // Индонезия: 62
-            if (cleaned.startsWith('62')) {
-                return '+' + cleaned;
-            }
-            
-            // Прочие страны
-            if (!cleaned.startsWith('+')) {
-                cleaned = '+' + cleaned;
-            }
-            
-            return cleaned;
+    // Текущий телефон, с которым уже открыт iframe (чтобы не перезагружать лишний раз)
+    let currentPhone = null;
+
+    /**
+     * Форматирование номера телефона
+     * - Убираем все нецифровые символы
+     * - Россия: 7XXXXXXXXXX или 8XXXXXXXXXX → +7XXXXXXXXXX
+     * - Остальные: просто добавляем "+" в начало
+     *
+     * Поддерживаются, в том числе, номера РФ (+7) и Индонезии (+62).
+     *
+     * @param {string} rawPhone исходная строка телефона
+     * @returns {string|null} отформатированный телефон в формате +XXXXXXXXXXX или null, если номер некорректен
+     */
+    function formatPhone(rawPhone) {
+      try {
+        if (!rawPhone) {
+          console.log('[formatPhone] Пустой номер телефона');
+          return null;
         }
 
-        // Функция загрузки Wazzup iframe
-        function loadWazzup(phone) {
-            const formattedPhone = formatPhone(phone);
-            
-            if (!formattedPhone) {
-                console.error('Некорректный номер телефона:', phone);
-                return;
-            }
-
-            // Формируем URL для Wazzup iframe API
-            const wazzupUrl = `https://api.wazzup24.com/v3/iframe?token=${WAZZUP_API_KEY}&phone=${encodeURIComponent(formattedPhone)}&transport=whatsapp`;
-            
-            console.log('Загружаю Wazzup для номера:', formattedPhone);
-            
-            // Устанавливаем src для iframe
-            document.getElementById('wazzup-frame').src = wazzupUrl;
+        // Убираем все, кроме цифр
+        const digits = String(rawPhone).replace(/\D/g, '');
+        if (!digits) {
+          console.log('[formatPhone] В номере нет цифр:', rawPhone);
+          return null;
         }
 
-        // Слушаем сообщения от Yclients
-        window.addEventListener('message', function(event) {
-            console.log('Получены данные от Yclients:', event.data);
-            
-            try {
-                const data = event.data;
-                
-                // Ищем номер телефона в разных возможных местах
-                let phone = null;
-                
-                if (data?.client?.phone) {
-                    phone = data.client.phone;
-                } else if (data?.phone) {
-                    phone = data.phone;
-                } else if (data?.record?.client?.phone) {
-                    phone = data.record.client.phone;
-                }
-                
-                if (phone) {
-                    loadWazzup(phone);
-                } else {
-                    console.error('Номер телефона не найден в данных:', data);
-                }
-                
-            } catch (error) {
-                console.error('Ошибка обработки данных:', error);
-            }
-        });
+        let normalized = digits;
 
-        // Для тестирования: поддержка прямого URL
-        const urlParams = new URLSearchParams(window.location.search);
-        const phoneParam = urlParams.get('phone');
-        
-        if (phoneParam) {
-            console.log('Тестовый режим - прямой доступ');
-            loadWazzup(phoneParam);
+        // Обработка России:
+        // - 8XXXXXXXXXX → 7XXXXXXXXXX
+        // - 7XXXXXXXXXX → 7XXXXXXXXXX (как есть)
+        if (normalized.length === 11 && (normalized.startsWith('7') || normalized.startsWith('8'))) {
+          // Для РФ приводим к 7XXXXXXXXXX
+          normalized = '7' + normalized.slice(1);
+        }
+
+        // Для всех остальных стран просто добавляем "+" в начало
+        const formatted = '+' + normalized;
+        console.log('[formatPhone] Нормализованный номер:', formatted);
+        return formatted;
+      } catch (err) {
+        console.error('[formatPhone] Ошибка форматирования номера:', err);
+        return null;
+      }
+    }
+
+    /**
+     * Построение URL для iframe Wazzup
+     * @param {string} formattedPhone телефон в формате +XXXXXXXXXXX
+     * @returns {string} готовый URL для iframe
+     */
+    function buildWazzupUrl(formattedPhone) {
+      const params = new URLSearchParams({
+        token: WAZZUP_API_KEY,
+        phone: formattedPhone,
+        transport: 'whatsapp', // по ТЗ используем WhatsApp
+      });
+
+      const url = `${WAZZUP_IFRAME_ENDPOINT}?${params.toString()}`;
+      console.log('[buildWazzupUrl] Сформирован URL:', url);
+      return url;
+    }
+
+    /**
+     * Устанавливает src для iframe, если номер изменился и валиден
+     * @param {string} formattedPhone телефон в формате +XXXXXXXXXXX
+     */
+    function loadWazzupIframe(formattedPhone) {
+      try {
+        if (!formattedPhone) {
+          console.warn('[loadWazzupIframe] Пустой/некорректный номер, iframe не будет загружен');
+          return;
+        }
+
+        if (formattedPhone === currentPhone) {
+          console.log('[loadWazzupIframe] Номер не изменился, перезагрузка iframe не требуется');
+          return;
+        }
+
+        const iframe = document.getElementById('wazzup-frame');
+        if (!iframe) {
+          console.error('[loadWazzupIframe] Iframe с id="wazzup-frame" не найден');
+          return;
+        }
+
+        const url = buildWazzupUrl(formattedPhone);
+        iframe.src = url;
+        currentPhone = formattedPhone;
+
+        console.log('[loadWazzupIframe] Iframe загружен для номера:', formattedPhone);
+      } catch (err) {
+        console.error('[loadWazzupIframe] Ошибка при загрузке iframe:', err);
+      }
+    }
+
+    /**
+     * Извлечь номер телефона из данных, отправленных Yclients через postMessage.
+     *
+     * Поддерживаем пути:
+     * - event.data.client.phone
+     * - event.data.phone
+     * - event.data.record.client.phone
+     *
+     * @param {any} data объект event.data
+     * @returns {string|null} найденный сырой номер телефона или null
+     */
+    function extractPhoneFromData(data) {
+      try {
+        if (!data || typeof data !== 'object') {
+          console.log('[extractPhoneFromData] data не объект:', data);
+          return null;
+        }
+
+        // Основной путь: data.client.phone
+        if (data.client && typeof data.client === 'object' && data.client.phone) {
+          console.log('[extractPhoneFromData] Найдено в data.client.phone:', data.client.phone);
+          return data.client.phone;
+        }
+
+        // Альтернативный путь: data.phone
+        if (data.phone) {
+          console.log('[extractPhoneFromData] Найдено в data.phone:', data.phone);
+          return data.phone;
+        }
+
+        // Альтернативный путь: data.record.client.phone
+        if (
+          data.record &&
+          typeof data.record === 'object' &&
+          data.record.client &&
+          typeof data.record.client === 'object' &&
+          data.record.client.phone
+        ) {
+          console.log('[extractPhoneFromData] Найдено в data.record.client.phone:', data.record.client.phone);
+          return data.record.client.phone;
+        }
+
+        console.log('[extractPhoneFromData] Телефон не найден в объекте data');
+        return null;
+      } catch (err) {
+        console.error('[extractPhoneFromData] Ошибка при разборе данных:', err);
+        return null;
+      }
+    }
+
+    /**
+     * Обработка события postMessage от родительского окна (Yclients)
+     */
+    function handleMessageEvent(event) {
+      try {
+        console.log('[handleMessageEvent] Получено сообщение от родителя:', event.data);
+
+        const rawPhone = extractPhoneFromData(event.data);
+        if (!rawPhone) {
+          console.warn('[handleMessageEvent] Номер телефона не найден в сообщении');
+          return;
+        }
+
+        const formattedPhone = formatPhone(rawPhone);
+        if (!formattedPhone) {
+          console.warn('[handleMessageEvent] Номер телефона не удалось форматировать:', rawPhone);
+          return;
+        }
+
+        loadWazzupIframe(formattedPhone);
+      } catch (err) {
+        console.error('[handleMessageEvent] Ошибка обработки сообщения:', err);
+      }
+    }
+
+    /**
+     * Отправляет в родительское окно сигнал о готовности iframe-интеграции
+     */
+    function sendReadySignal() {
+      try {
+        // Используем "*" по ТЗ; при необходимости можно сузить до конкретного origin
+        window.parent.postMessage({ type: 'ready' }, '*');
+        console.log('[sendReadySignal] Отправлен сигнал готовности { type: "ready" }');
+      } catch (err) {
+        console.error('[sendReadySignal] Ошибка при отправке сигнала готовности:', err);
+      }
+    }
+
+    /**
+     * Проверка режима тестирования (?phone=...) и, при наличии, загрузка чата напрямую
+     */
+    function initFromQueryString() {
+      try {
+        const url = new URL(window.location.href);
+        const testPhone = url.searchParams.get('phone');
+
+        if (testPhone) {
+          console.log('[initFromQueryString] Обнаружен тестовый номер из URL-параметра phone:', testPhone);
+          const formattedPhone = formatPhone(testPhone);
+          if (!formattedPhone) {
+            console.warn('[initFromQueryString] Тестовый номер не удалось форматировать');
+            return;
+          }
+          loadWazzupIframe(formattedPhone);
         } else {
-            // Сообщаем Yclients что готовы
-            window.parent.postMessage({ type: 'ready' }, '*');
-            console.log('Ожидание данных от Yclients...');
+          console.log('[initFromQueryString] URL-параметр phone не указан, ожидаем данные от Yclients через postMessage');
         }
-    </script>
+      } catch (err) {
+        console.error('[initFromQueryString] Ошибка разбора URL-параметров:', err);
+      }
+    }
+
+    // ================== ИНИЦИАЛИЗАЦИЯ ==================
+
+    (function init() {
+      console.log('[init] Инициализация страницы интеграции Wazzup/Yclients начата');
+
+      try {
+        // Слушаем сообщения от родительского окна (Yclients)
+        window.addEventListener('message', handleMessageEvent, false);
+        console.log('[init] Добавлен обработчик window.message');
+
+        // Режим тестирования через ?phone=...
+        initFromQueryString();
+
+        // Сигнал готовности для Yclients
+        sendReadySignal();
+
+        console.log('[init] Инициализация завершена');
+      } catch (err) {
+        console.error('[init] Ошибка инициализации:', err);
+      }
+    })();
+  </script>
 </body>
 </html>
